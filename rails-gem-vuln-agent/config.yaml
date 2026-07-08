@@ -1,0 +1,74 @@
+# Rails Gem Vulnerability Agent Configuration
+
+llm:
+  provider: openai  # openai | anthropic | gen_ai
+  model: gpt-4o
+  temperature: 0.2
+  max_tokens: 4096
+
+scanner:
+  tools:
+    - bundle-audit
+    - osv-scanner  # optional, comment out if not installed
+  severity_threshold: medium  # low | medium | high | critical
+
+analyzer:
+  # Sources the AI will consult for each vulnerable gem
+  sources:
+    - changelog
+    - release_notes
+    - github_issues
+    - rails_compatibility
+  # Maximum major version bumps allowed without manual approval
+  max_major_bump: 1
+
+updater:
+  # Strategy: minimum (smallest safe bump) | latest (latest compatible)
+  strategy: minimum
+  # Whether to update Gemfile.lock only or also pin in Gemfile
+  pin_in_gemfile: true
+
+verifier:
+  steps:
+    - bundle install
+    - bundle exec rspec
+    - bundle exec rubocop --autocorrect-all
+    - bundle exec brakeman --no-pager -q
+    - bundle audit check
+  # Rails-specific checks
+  rails_checks:
+    - bin/rails zeitwerk:check
+  timeout_seconds: 600
+
+retry:
+  max_attempts: 3
+  # Whether to attempt rollback on persistent failure
+  rollback_on_failure: true
+
+pr:
+  # Git platform: github | bitbucket (auto-detected from remote URL if not set)
+  # platform: bitbucket
+  # Branch naming pattern
+  branch_pattern: "security/fix-{gem}-{cve}"
+  # PR labels (GitHub only; Bitbucket doesn't support labels on PRs)
+  labels:
+    - security
+    - automated
+    - dependencies
+  # Whether to auto-request review
+  auto_request_review: true
+  reviewers:
+    - your-team-lead
+
+risk_scoring:
+  # Weights for risk calculation
+  weights:
+    semver_major: 0.4
+    dependency_count: 0.2
+    test_coverage: 0.2
+    breaking_changes: 0.2
+  # Thresholds
+  thresholds:
+    low: 0.3
+    medium: 0.6
+    high: 0.8

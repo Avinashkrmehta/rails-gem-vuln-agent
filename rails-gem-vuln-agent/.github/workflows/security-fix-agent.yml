@@ -1,0 +1,83 @@
+name: Security Fix Agent
+
+on:
+  schedule:
+    # Run every Monday at 2 AM UTC
+    - cron: "0 2 * * 1"
+  workflow_dispatch:
+    inputs:
+      target_gem:
+        description: "Specific gem to fix (leave empty for all)"
+        required: false
+        type: string
+      dry_run:
+        description: "Dry run (scan only)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  security-events: read
+
+jobs:
+  security-agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r rails-gem-vuln-agent/requirements.txt
+
+      - name: Install security tools
+        run: |
+          gem install bundler-audit brakeman
+          bundle install
+
+      - name: Run vulnerability scan
+        run: |
+          bundle audit check --update || true
+
+      - name: Run Security Fix Agent
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RAILS_APP_PATH: ${{ github.workspace }}
+        run: |
+          cd rails-gem-vuln-agent
+          ARGS="--rails-app ${{ github.workspace }} --create-pr"
+          
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          
+          if [ -n "${{ inputs.target_gem }}" ]; then
+            ARGS="$ARGS --gem ${{ inputs.target_gem }}"
+          fi
+          
+          python main.py $ARGS
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulnerability-report
+          path: rails-gem-vuln-agent/reports/
+          retention-days: 30
